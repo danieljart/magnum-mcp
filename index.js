@@ -34,7 +34,7 @@ server.tool(
   async ({ data }) => {
     const { data: viagens, error } = await supabase
       .from("viagens")
-      .select("id, valor_base, vagas_disponiveis, status, horario_saida, tipo_onibus, local_embarque, tempo_viagem")
+      .select("id, valor_base, vagas_disponiveis, status, horario_saida, tipo_onibus, local_embarque, tempo_viagem, distancia_km")
       .eq("data_saida", data);
 
     if (error) {
