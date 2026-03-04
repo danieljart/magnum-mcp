@@ -339,33 +339,28 @@ app.get("/sse", async (req, res) => {
   const sessionId = Math.random().toString(36).substring(7);
   console.log(`[SSE] [NEW] IP: ${req.ip} Session: ${sessionId}`);
 
-  // Clear any pending deletion for this session
   if (sessionTimeouts.has(sessionId)) {
     clearTimeout(sessionTimeouts.get(sessionId));
     sessionTimeouts.delete(sessionId);
   }
 
-  // Important headers for SSE
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
-  // We tell the client to POST to /messages/<id>
   const transport = new SSEServerTransport(`/messages/${sessionId}`, res);
   transports.set(sessionId, transport);
 
   res.on('close', () => {
-    console.log(`[SSE] [DISCONNECTED] Session: ${sessionId}. Keeping alive for 30s grace period.`);
-    // Keep session alive for 30 seconds to allow POST messages from stateless clients
+    console.log(`[SSE] [DISCONNECTED] Session: ${sessionId}. Grace period: 5min.`);
+    // Increased to 5 minutes for absolute safety with slow bots
     const timeout = setTimeout(() => {
-      console.log(`[SSE] [CLEANUP] Deleting session: ${sessionId}`);
+      console.log(`[SSE] [CLEANUP] Exposing session: ${sessionId}`);
       transports.delete(sessionId);
       sessionTimeouts.delete(sessionId);
-      console.log(`[SSE] Active sessions: ${transports.size}`);
-    }, 30000); // 30 second grace period
+    }, 300000);
 
     sessionTimeouts.set(sessionId, timeout);
-    console.log(`[SSE] Active sessions: ${transports.size}`);
   });
 
   await server.connect(transport);
@@ -383,13 +378,28 @@ app.post("/sse", async (req, res) => {
 });
 
 app.post("/messages/:sessionId", async (req, res) => {
-  const { sessionId } = req.params;
-  console.log(`[POST] Session: ${sessionId}`);
+  let { sessionId } = req.params;
+  console.log(`[POST] Request for Session: ${sessionId}`);
 
-  const transport = transports.get(sessionId);
+  let transport = transports.get(sessionId);
+
+  // SINGLETON FALLBACK: If ID not found but there's only one active session, use it.
+  // This helps with stateless clients or race conditions.
+  if (!transport && transports.size === 1) {
+    const onlySessionId = Array.from(transports.keys())[0];
+    console.log(`[POST] Session ${sessionId} not found, but only one session exists. Falling back to: ${onlySessionId}`);
+    sessionId = onlySessionId;
+    transport = transports.get(sessionId);
+  }
+
   if (!transport) {
-    console.error(`[POST] ERROR: Session ${sessionId} not found.`);
-    res.status(400).json({ error: "Session not found", sessionId });
+    console.error(`[POST] ERROR: Session ${sessionId} not found. Active: ${Array.from(transports.keys()).join(',')}`);
+    res.status(400).json({
+      error: "Session not found",
+      requestedId: sessionId,
+      activeSessions: transports.size,
+      availableIds: Array.from(transports.keys())
+    });
     return;
   }
   await transport.handlePostMessage(req, res);
