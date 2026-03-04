@@ -1,0 +1,21 @@
+{
+  "name": "mcp-server",
+  "version": "1.0.0",
+  "description": "Magnum Turismo MCP Server",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "sync": "node sync-calendar.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "@supabase/supabase-js": "^2.98.0",
+    "dotenv": "^17.3.1",
+    "googleapis": "^171.4.0",
+    "zod": "^4.3.6"
+  }
+}
