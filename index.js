@@ -337,43 +337,44 @@ const transports = new Map();
 
 app.get("/sse", async (req, res) => {
   const sessionId = Math.random().toString(36).substring(7);
-  console.log(`[SSE] NEW CONNECTION. IP: ${req.ip} Session: ${sessionId}`);
-  console.log(`[SSE] Headers: ${JSON.stringify(req.headers)}`);
+  console.log(`[SSE] [NEW] IP: ${req.ip} Session: ${sessionId}`);
 
-  const transport = new SSEServerTransport(`/sse?sessionId=${sessionId}`, res);
+  // Important headers for SSE
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  // We tell the client to POST to /messages/<id>
+  const transport = new SSEServerTransport(`/messages/${sessionId}`, res);
   transports.set(sessionId, transport);
 
   res.on('close', () => {
-    console.log(`[SSE] CLOSED. Session: ${sessionId}`);
+    console.log(`[SSE] [CLOSED] Session: ${sessionId}`);
     transports.delete(sessionId);
   });
 
   await server.connect(transport);
 });
 
+// Fallback for GPT Maker if it tries to POST to /sse directly
 app.post("/sse", async (req, res) => {
-  const sessionId = req.query.sessionId || req.headers["mcp-session-id"];
-  console.log(`[POST] MESSAGE. IP: ${req.ip} Session: ${sessionId} (Map Size: ${transports.size})`);
-
-  if (!sessionId) {
-    // Fallback to the first transport only if it's the only one (debugging only)
-    if (transports.size === 1) {
-      const fallbackId = Array.from(transports.keys())[0];
-      console.log(`[POST] Using fallback session: ${fallbackId}`);
-      const transport = transports.get(fallbackId);
-      await transport.handlePostMessage(req, res);
-      return;
-    }
-
-    console.error(`[POST] ERROR: No sessionId found in query or headers.`);
-    res.status(400).json({ error: "Missing sessionId", sessionsAvail: Array.from(transports.keys()) });
-    return;
+  console.log(`[POST-SSE] Received POST on /sse from ${req.ip}. Redirecting to /messages...`);
+  const sessionId = req.query.sessionId || Array.from(transports.keys())[0];
+  if (sessionId) {
+    const transport = transports.get(sessionId);
+    if (transport) return await transport.handlePostMessage(req, res);
   }
+  res.status(400).json({ error: "No active session", hint: "Connect via GET /sse first" });
+});
+
+app.post("/messages/:sessionId", async (req, res) => {
+  const { sessionId } = req.params;
+  console.log(`[POST] Session: ${sessionId}`);
 
   const transport = transports.get(sessionId);
   if (!transport) {
-    console.error(`[POST] ERROR: Session ${sessionId} not found in Map.`);
-    res.status(400).json({ error: "No active session", sessionId, activeSessions: Array.from(transports.keys()) });
+    console.error(`[POST] ERROR: Session ${sessionId} not found.`);
+    res.status(400).json({ error: "Session not found", sessionId });
     return;
   }
   await transport.handlePostMessage(req, res);
