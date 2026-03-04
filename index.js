@@ -293,6 +293,11 @@ app.use((req, res, next) => {
     return next();
   }
 
+  // Allow root health check and favicon without auth
+  if (req.path === '/' || req.path === '/favicon.ico') {
+    return next();
+  }
+
   const apiKey = process.env.MCP_API_KEY;
   if (!apiKey) {
     console.log("No MCP_API_KEY set, allowing request.");
@@ -316,7 +321,7 @@ app.use((req, res, next) => {
     return next();
   }
 
-  console.log(`Unauthorized attempt with key: ${providedKey}`);
+  console.log(`Unauthorized attempt with key: ${providedKey} on path: ${req.path}`);
   res.status(401).json({ error: "Unauthorized", message: "Invalid API Key" });
 });
 
@@ -327,8 +332,8 @@ app.get("/sse", async (req, res) => {
   console.log(`[SSE] Headers: ${JSON.stringify(req.headers)}`);
   console.log(`[SSE] Query: ${JSON.stringify(req.query)}`);
 
-  // Use the full URL if possible, otherwise relative
-  const transport = new SSEServerTransport("/messages", res);
+  // Use /sse for messages as well to support GPT Maker
+  const transport = new SSEServerTransport("/sse", res);
   const sessionId = Math.random().toString(36).substring(7);
   transports.set(sessionId, transport);
 
@@ -337,15 +342,13 @@ app.get("/sse", async (req, res) => {
   res.on('close', () => {
     console.log(`Session closed: ${sessionId}`);
     transports.delete(sessionId);
-    // Don't close the whole server, just clean up
   });
 
   await server.connect(transport);
 });
 
-app.post("/messages", async (req, res) => {
-  console.log(`[Messages] POST received from ${req.ip}`);
-  console.log(`[Messages] Headers: ${JSON.stringify(req.headers)}`);
+app.post("/sse", async (req, res) => {
+  console.log(`[Messages] POST received on /sse from ${req.ip}`);
 
   const sessionId = req.query.sessionId || req.headers["mcp-session-id"] || Array.from(transports.keys())[0];
   console.log(`[Messages] Target Session: ${sessionId}`);
@@ -353,7 +356,7 @@ app.post("/messages", async (req, res) => {
   const transport = transports.get(sessionId);
   if (!transport) {
     console.error(`No transport found for session: ${sessionId}`);
-    res.status(400).send("No active SSE transport");
+    res.status(400).json({ error: "No active session", message: "Connect via GET /sse first" });
     return;
   }
   await transport.handlePostMessage(req, res);
