@@ -293,23 +293,19 @@ app.use((req, res, next) => {
     return next();
   }
 
-  // Allow root health check and favicon without auth
-  if (req.path === '/' || req.path === '/favicon.ico') {
+  // Allow root health check, favicon and a new debug endpoint without auth
+  if (req.path === '/' || req.path === '/favicon.ico' || req.path === '/debug') {
     return next();
   }
 
   const apiKey = process.env.MCP_API_KEY;
   if (!apiKey) {
-    console.log("No MCP_API_KEY set, allowing request.");
     return next();
   }
 
-  // Check X-API-Key header
   const xApiKey = req.headers["x-api-key"];
-
-  // Check Authorization: Bearer <key> header
-  let authHeaderKey = null;
   const authHeader = req.headers["authorization"];
+  let authHeaderKey = null;
   if (authHeader && authHeader.startsWith("Bearer ")) {
     authHeaderKey = authHeader.substring(7);
   }
@@ -317,30 +313,38 @@ app.use((req, res, next) => {
   const providedKey = xApiKey || authHeaderKey || req.query.apiKey;
 
   if (providedKey === apiKey) {
-    console.log("Valid API Key provided.");
     return next();
   }
 
-  console.log(`Unauthorized attempt with key: ${providedKey} on path: ${req.path}`);
+  console.log(`[AUTH] Refused ${req.method} ${req.path} - Provided Key: ${providedKey}`);
   res.status(401).json({ error: "Unauthorized", message: "Invalid API Key" });
+});
+
+// New Debug Endpoint
+app.get("/debug", (req, res) => {
+  res.json({
+    status: "running",
+    activeSessions: Array.from(transports.keys()),
+    sessionCount: transports.size,
+    env: {
+      hasApiKey: !!process.env.MCP_API_KEY,
+      port: process.env.PORT
+    }
+  });
 });
 
 const transports = new Map();
 
 app.get("/sse", async (req, res) => {
-  console.log(`[SSE] New connection attempt from ${req.ip}`);
-  console.log(`[SSE] Headers: ${JSON.stringify(req.headers)}`);
-  console.log(`[SSE] Query: ${JSON.stringify(req.query)}`);
-
-  // Use /sse for messages as well to support GPT Maker
-  const transport = new SSEServerTransport("/sse", res);
   const sessionId = Math.random().toString(36).substring(7);
+  console.log(`[SSE] NEW CONNECTION. IP: ${req.ip} Session: ${sessionId}`);
+  console.log(`[SSE] Headers: ${JSON.stringify(req.headers)}`);
+
+  const transport = new SSEServerTransport(`/sse?sessionId=${sessionId}`, res);
   transports.set(sessionId, transport);
 
-  console.log(`Session established: ${sessionId}`);
-
   res.on('close', () => {
-    console.log(`Session closed: ${sessionId}`);
+    console.log(`[SSE] CLOSED. Session: ${sessionId}`);
     transports.delete(sessionId);
   });
 
@@ -348,15 +352,28 @@ app.get("/sse", async (req, res) => {
 });
 
 app.post("/sse", async (req, res) => {
-  console.log(`[Messages] POST received on /sse from ${req.ip}`);
+  const sessionId = req.query.sessionId || req.headers["mcp-session-id"];
+  console.log(`[POST] MESSAGE. IP: ${req.ip} Session: ${sessionId} (Map Size: ${transports.size})`);
 
-  const sessionId = req.query.sessionId || req.headers["mcp-session-id"] || Array.from(transports.keys())[0];
-  console.log(`[Messages] Target Session: ${sessionId}`);
+  if (!sessionId) {
+    // Fallback to the first transport only if it's the only one (debugging only)
+    if (transports.size === 1) {
+      const fallbackId = Array.from(transports.keys())[0];
+      console.log(`[POST] Using fallback session: ${fallbackId}`);
+      const transport = transports.get(fallbackId);
+      await transport.handlePostMessage(req, res);
+      return;
+    }
+
+    console.error(`[POST] ERROR: No sessionId found in query or headers.`);
+    res.status(400).json({ error: "Missing sessionId", sessionsAvail: Array.from(transports.keys()) });
+    return;
+  }
 
   const transport = transports.get(sessionId);
   if (!transport) {
-    console.error(`No transport found for session: ${sessionId}`);
-    res.status(400).json({ error: "No active session", message: "Connect via GET /sse first" });
+    console.error(`[POST] ERROR: Session ${sessionId} not found in Map.`);
+    res.status(400).json({ error: "No active session", sessionId, activeSessions: Array.from(transports.keys()) });
     return;
   }
   await transport.handlePostMessage(req, res);
