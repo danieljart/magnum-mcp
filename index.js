@@ -182,6 +182,111 @@ server.tool(
   }
 );
 
+// Tool 5: Consult Reservation
+server.tool(
+  "consultar_reserva",
+  "Consulta uma reserva pelo código ou telefone do cliente.",
+  {
+    codigo_ou_telefone: z.string().describe("Código da reserva ou telefone do cliente"),
+  },
+  async ({ codigo_ou_telefone }) => {
+    const isCode = codigo_ou_telefone.length > 10 && !codigo_ou_telefone.includes("-"); // Simplified check
+
+    let query = supabase
+      .from("reservas")
+      .select(`
+        id, codigo_reserva, nome_cliente, telefone, quantidade, valor_total, status, created_at,
+        viagens (origem, destino, data_saida, horario_saida, tipo_onibus)
+      `);
+
+    if (isCode) {
+      query = query.eq("codigo_reserva", codigo_ou_telefone);
+    } else {
+      query = query.eq("telefone", codigo_ou_telefone);
+    }
+
+    const { data: reservas, error } = await query;
+
+    if (error) {
+      return {
+        content: [{ type: "text", text: `Erro ao buscar reserva: ${error.message}` }],
+        isError: true,
+      };
+    }
+
+    if (!reservas || reservas.length === 0) {
+      return {
+        content: [{ type: "text", text: "Nenhuma reserva encontrada com esses dados." }],
+      };
+    }
+
+    return {
+      content: [{ type: "text", text: JSON.stringify(reservas, null, 2) }],
+    };
+  }
+);
+
+// Tool 6: Cancel Reservation
+server.tool(
+  "cancelar_reserva",
+  "Cancela uma reserva e libera as vagas no banco de dados.",
+  {
+    reserva_id: z.string().uuid().describe("ID (UUID) da reserva a ser cancelada"),
+  },
+  async ({ reserva_id }) => {
+    // 1. Get reservation details to know the trip_id and quantity
+    const { data: reserva, error: fetchError } = await supabase
+      .from("reservas")
+      .select("viagem_id, quantidade, status")
+      .eq("id", reserva_id)
+      .single();
+
+    if (fetchError || !reserva) {
+      return {
+        content: [{ type: "text", text: "Erro ao localizar a reserva." }],
+        isError: true,
+      };
+    }
+
+    if (reserva.status === "CANCELADO") {
+      return {
+        content: [{ type: "text", text: "Esta reserva já consta como cancelada." }],
+      };
+    }
+
+    // 2. Update reservation status
+    const { error: updateError } = await supabase
+      .from("reservas")
+      .update({ status: "CANCELADO" })
+      .eq("id", reserva_id);
+
+    if (updateError) {
+      return {
+        content: [{ type: "text", text: `Erro ao cancelar reserva: ${updateError.message}` }],
+        isError: true,
+      };
+    }
+
+    // 3. Increment available seats in the trip
+    const { data: viagem, error: tripFetchError } = await supabase
+      .from("viagens")
+      .select("vagas_disponiveis")
+      .eq("id", reserva.viagem_id)
+      .single();
+
+    if (!tripFetchError && viagem) {
+      await supabase
+        .from("viagens")
+        .update({ vagas_disponiveis: viagem.vagas_disponiveis + reserva.quantidade })
+        .eq("id", reserva.viagem_id);
+    }
+
+    return {
+      content: [{ type: "text", text: `Reserva ${reserva_id} cancelada com sucesso. As ${reserva.quantidade} vagas foram liberadas.` }],
+    };
+  }
+);
+
 // Setup Express with SSE
 const app = express();
 
