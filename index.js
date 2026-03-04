@@ -334,10 +334,17 @@ app.get("/debug", (req, res) => {
 });
 
 const transports = new Map();
+const sessionTimeouts = new Map();
 
 app.get("/sse", async (req, res) => {
   const sessionId = Math.random().toString(36).substring(7);
   console.log(`[SSE] [NEW] IP: ${req.ip} Session: ${sessionId}`);
+
+  // Clear any pending deletion for this session
+  if (sessionTimeouts.has(sessionId)) {
+    clearTimeout(sessionTimeouts.get(sessionId));
+    sessionTimeouts.delete(sessionId);
+  }
 
   // Important headers for SSE
   res.setHeader('Content-Type', 'text/event-stream');
@@ -349,8 +356,17 @@ app.get("/sse", async (req, res) => {
   transports.set(sessionId, transport);
 
   res.on('close', () => {
-    console.log(`[SSE] [CLOSED] Session: ${sessionId}`);
-    transports.delete(sessionId);
+    console.log(`[SSE] [DISCONNECTED] Session: ${sessionId}. Keeping alive for 30s grace period.`);
+    // Keep session alive for 30 seconds to allow POST messages from stateless clients
+    const timeout = setTimeout(() => {
+      console.log(`[SSE] [CLEANUP] Deleting session: ${sessionId}`);
+      transports.delete(sessionId);
+      sessionTimeouts.delete(sessionId);
+      console.log(`[SSE] Active sessions: ${transports.size}`);
+    }, 30000); // 30 second grace period
+
+    sessionTimeouts.set(sessionId, timeout);
+    console.log(`[SSE] Active sessions: ${transports.size}`);
   });
 
   await server.connect(transport);
