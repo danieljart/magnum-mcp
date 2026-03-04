@@ -184,41 +184,67 @@ server.tool(
 
 // Setup Express with SSE
 const app = express();
-app.use(cors());
+
+// Detailed CORS configuration
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key']
+}));
+
 app.use(express.json());
+
+// Root route for health check
+app.get("/", (req, res) => {
+  res.send("Magnum Turismo MCP Server is running! Use /sse for MCP connection.");
+});
 
 // Basic Security Middleware
 app.use((req, res, next) => {
   const apiKey = process.env.MCP_API_KEY;
-  if (!apiKey) return next(); // If no key set, allow access (dev mode)
-
-  const providedKey = req.headers["x-api-key"];
-  if (providedKey === apiKey) {
+  if (!apiKey) {
+    console.log("No MCP_API_KEY set, allowing request.");
     return next();
   }
+
+  const providedKey = req.headers["x-api-key"] || req.query.apiKey;
+  if (providedKey === apiKey) {
+    console.log("Valid API Key provided.");
+    return next();
+  }
+  
+  console.log(`Unauthorized attempt with key: ${providedKey}`);
   res.status(401).send("Unauthorized: Invalid API Key");
 });
 
 const transports = new Map();
 
 app.get("/sse", async (req, res) => {
-  console.log("New SSE connection");
+  console.log("New SSE connection attempt...");
+  
+  // Use the full URL if possible, otherwise relative
   const transport = new SSEServerTransport("/messages", res);
   const sessionId = Math.random().toString(36).substring(7);
   transports.set(sessionId, transport);
 
+  console.log(`Session established: ${sessionId}`);
+
   res.on('close', () => {
+    console.log(`Session closed: ${sessionId}`);
     transports.delete(sessionId);
-    server.close();
+    // Don't close the whole server, just clean up
   });
 
   await server.connect(transport);
 });
 
 app.post("/messages", async (req, res) => {
-  console.log("New message received");
-  const transport = Array.from(transports.values())[0]; // Simplification for single-session use
+  const sessionId = req.query.sessionId || Array.from(transports.keys())[0];
+  console.log(`Message received for session: ${sessionId}`);
+  
+  const transport = transports.get(sessionId);
   if (!transport) {
+    console.error(`No transport found for session: ${sessionId}`);
     res.status(400).send("No active SSE transport");
     return;
   }
@@ -226,8 +252,8 @@ app.post("/messages", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`Magnum Turismo MCP Server running on port ${PORT}`);
-  console.log(`SSE endpoint: http://localhost:${PORT}/sse`);
-  console.log(`Messages endpoint: http://localhost:${PORT}/messages`);
+  console.log(`SSE endpoint: /sse`);
+  console.log(`Messages endpoint: /messages`);
 });
