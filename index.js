@@ -169,8 +169,9 @@ server.tool(
     }
 
     const resposta = paradas.map(p => {
+      const distInfo = p.distancia_origem_km !== null ? ` (Aprox. ${p.distancia_origem_km}km de Belém)` : "";
       if (p.eh_oficial) {
-        return `✅ ${p.cidade} (${p.estado}) é uma parada oficial.`;
+        return `✅ ${p.cidade} (${p.estado}) é uma parada oficial.${distInfo}`;
       } else {
         return `📍 Para ${p.cidade}, a parada oficial mais próxima é ${p.cidade_referencia} (${p.estado}).`;
       }
@@ -178,6 +179,48 @@ server.tool(
 
     return {
       content: [{ type: "text", text: resposta }],
+    };
+  }
+);
+
+// Tool 7: Calculate Segment Distance
+server.tool(
+  "calcular_distancia_trecho",
+  "Calcula a distância rodoviária aproximada entre duas cidades da rota.",
+  {
+    cidade_origem: z.string().describe("Cidade de embarque"),
+    cidade_destino: z.string().describe("Cidade de desembarque"),
+  },
+  async ({ cidade_origem, cidade_destino }) => {
+    const { data: paradas, error } = await supabase
+      .from("paradas_rota")
+      .select("cidade, distancia_origem_km")
+      .or(`cidade.ilike.%${cidade_origem}%,cidade.ilike.%${cidade_destino}%`);
+
+    if (error || !paradas || paradas.length < 2) {
+      return {
+        content: [{ type: "text", text: "Não foi possível localizar as duas cidades na rota para calcular a distância. Verifique se os nomes estão corretos." }],
+        isError: true,
+      };
+    }
+
+    const p1 = paradas.find(p => p.cidade.toLowerCase().includes(cidade_origem.toLowerCase()));
+    const p2 = paradas.find(p => p.cidade.toLowerCase().includes(cidade_destino.toLowerCase()));
+
+    if (!p1 || !p2 || p1.distancia_origem_km === null || p2.distancia_origem_km === null) {
+      return {
+        content: [{ type: "text", text: "Dados de quilometragem incompletos para um desses pontos." }],
+        isError: true,
+      };
+    }
+
+    const distancia = Math.abs(p1.distancia_origem_km - p2.distancia_origem_km);
+
+    return {
+      content: [{
+        type: "text",
+        text: `A distância aproximada entre ${p1.cidade} e ${p2.cidade} é de ${distancia} km.`
+      }],
     };
   }
 );
