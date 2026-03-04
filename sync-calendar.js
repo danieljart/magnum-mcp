@@ -37,8 +37,8 @@ function parseDescription(description) {
     });
     return {
         status: data['STATUS'] || 'ATIVO',
-        origem: data['ROTA'] && data['ROTA'].includes('x') ? data['ROTA'].split('x')[0].trim() : 'Belém',
-        destino: data['ROTA'] && data['ROTA'].includes('x') ? data['ROTA'].split('x')[1].trim() : (data['ROTA'] || 'Destino'),
+        origem: (data['ROTA'] && data['ROTA'].includes('x') ? data['ROTA'].split('x')[0].trim() : 'Belém').replace(/-PA$/i, ''),
+        destino: (data['ROTA'] && data['ROTA'].includes('x') ? data['ROTA'].split('x')[1].trim() : (data['ROTA'] || 'Destino')).replace(/-PA$/i, ''),
         data_saida: data['DATA_SAIDA'] ? formatToISO(data['DATA_SAIDA']) : null,
         tipo_onibus: data['ONIBUS'],
         vagas_total: parseInt(data['LUGARES_TOTAIS']) || 0,

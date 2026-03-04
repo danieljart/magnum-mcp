@@ -269,66 +269,6 @@ server.tool(
   }
 );
 
-// Tool 6: Cancel Reservation
-server.tool(
-  "cancelar_reserva",
-  "Cancela uma reserva e libera as vagas no banco de dados.",
-  {
-    reserva_id: z.string().uuid().describe("ID (UUID) da reserva a ser cancelada"),
-  },
-  async ({ reserva_id }) => {
-    // 1. Get reservation details to know the trip_id and quantity
-    const { data: reserva, error: fetchError } = await supabase
-      .from("reservas")
-      .select("viagem_id, quantidade, status")
-      .eq("id", reserva_id)
-      .single();
-
-    if (fetchError || !reserva) {
-      return {
-        content: [{ type: "text", text: "Erro ao localizar a reserva." }],
-        isError: true,
-      };
-    }
-
-    if (reserva.status === "CANCELADO") {
-      return {
-        content: [{ type: "text", text: "Esta reserva já consta como cancelada." }],
-      };
-    }
-
-    // 2. Update reservation status
-    const { error: updateError } = await supabase
-      .from("reservas")
-      .update({ status: "CANCELADO" })
-      .eq("id", reserva_id);
-
-    if (updateError) {
-      return {
-        content: [{ type: "text", text: `Erro ao cancelar reserva: ${updateError.message}` }],
-        isError: true,
-      };
-    }
-
-    // 3. Increment available seats in the trip
-    const { data: viagem, error: tripFetchError } = await supabase
-      .from("viagens")
-      .select("vagas_disponiveis")
-      .eq("id", reserva.viagem_id)
-      .single();
-
-    if (!tripFetchError && viagem) {
-      await supabase
-        .from("viagens")
-        .update({ vagas_disponiveis: viagem.vagas_disponiveis + reserva.quantidade })
-        .eq("id", reserva.viagem_id);
-    }
-
-    return {
-      content: [{ type: "text", text: `Reserva ${reserva_id} cancelada com sucesso. As ${reserva.quantidade} vagas foram liberadas.` }],
-    };
-  }
-);
 
 // Setup Express with SSE
 const app = express();
@@ -337,7 +277,7 @@ const app = express();
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'Mcp-Session-Id']
 }));
 
 app.use(express.json());
@@ -347,8 +287,12 @@ app.get("/", (req, res) => {
   res.send("Magnum Turismo MCP Server is running! Use /sse for MCP connection.");
 });
 
-// Basic Security Middleware
 app.use((req, res, next) => {
+  // Allow OPTIONS requests for CORS preflight
+  if (req.method === 'OPTIONS') {
+    return next();
+  }
+
   const apiKey = process.env.MCP_API_KEY;
   if (!apiKey) {
     console.log("No MCP_API_KEY set, allowing request.");
@@ -373,7 +317,7 @@ app.use((req, res, next) => {
   }
 
   console.log(`Unauthorized attempt with key: ${providedKey}`);
-  res.status(401).send("Unauthorized: Invalid API Key");
+  res.status(401).json({ error: "Unauthorized", message: "Invalid API Key" });
 });
 
 const transports = new Map();
