@@ -3,6 +3,7 @@ import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
 import express from "express";
+import cors from "cors";
 import { z } from "zod";
 
 dotenv.config();
@@ -183,6 +184,7 @@ server.tool(
 
 // Setup Express with SSE
 const app = express();
+app.use(cors());
 app.use(express.json());
 
 // Basic Security Middleware
@@ -197,16 +199,25 @@ app.use((req, res, next) => {
   res.status(401).send("Unauthorized: Invalid API Key");
 });
 
-let transport;
+const transports = new Map();
 
 app.get("/sse", async (req, res) => {
   console.log("New SSE connection");
-  transport = new SSEServerTransport("/messages", res);
+  const transport = new SSEServerTransport("/messages", res);
+  const sessionId = Math.random().toString(36).substring(7);
+  transports.set(sessionId, transport);
+
+  res.on('close', () => {
+    transports.delete(sessionId);
+    server.close();
+  });
+
   await server.connect(transport);
 });
 
 app.post("/messages", async (req, res) => {
   console.log("New message received");
+  const transport = Array.from(transports.values())[0]; // Simplification for single-session use
   if (!transport) {
     res.status(400).send("No active SSE transport");
     return;

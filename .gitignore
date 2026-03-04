@@ -1,8 +1,9 @@
 node_modules/
 .env
-mcp-server/.env
-mcp-server/credentials.json
-mcp-server/token.json
+.env.example
+credentials.json
+token.json
+env.example
 .DS_Store
 dist/
 build/
