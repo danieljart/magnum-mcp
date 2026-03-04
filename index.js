@@ -288,20 +288,13 @@ app.get("/", (req, res) => {
 });
 
 app.use((req, res, next) => {
-  // Allow OPTIONS requests for CORS preflight
-  if (req.method === 'OPTIONS') {
-    return next();
-  }
+  console.log(`[AUTH-DEBUG] Incoming ${req.method} ${req.path}`);
 
-  // Allow root health check, favicon and a new debug endpoint without auth
-  if (req.path === '/' || req.path === '/favicon.ico' || req.path === '/debug') {
-    return next();
-  }
+  if (req.method === 'OPTIONS') return next();
+  if (req.path === '/' || req.path === '/favicon.ico' || req.path === '/debug') return next();
 
   const apiKey = process.env.MCP_API_KEY;
-  if (!apiKey) {
-    return next();
-  }
+  if (!apiKey) return next();
 
   const xApiKey = req.headers["x-api-key"];
   const authHeader = req.headers["authorization"];
@@ -313,11 +306,17 @@ app.use((req, res, next) => {
   const providedKey = xApiKey || authHeaderKey || req.query.apiKey;
 
   if (providedKey === apiKey) {
+    console.log(`[AUTH-DEBUG] ✅ Authorized ${req.method} ${req.path}`);
     return next();
   }
 
-  console.log(`[AUTH] Refused ${req.method} ${req.path} - Provided Key: ${providedKey}`);
-  res.status(401).json({ error: "Unauthorized", message: "Invalid API Key" });
+  console.log(`[AUTH-DEBUG] ❌ Refused ${req.method} ${req.path}. Expected: ${apiKey.substring(0, 3)}... Provided: ${providedKey}`);
+  res.status(401).json({
+    error: "Unauthorized",
+    message: "Invalid API Key",
+    path: req.path,
+    method: req.method
+  });
 });
 
 // New Debug Endpoint
