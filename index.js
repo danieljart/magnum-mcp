@@ -207,12 +207,23 @@ app.use((req, res, next) => {
     return next();
   }
 
-  const providedKey = req.headers["x-api-key"] || req.query.apiKey;
+  // Check X-API-Key header
+  const xApiKey = req.headers["x-api-key"];
+
+  // Check Authorization: Bearer <key> header
+  let authHeaderKey = null;
+  const authHeader = req.headers["authorization"];
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    authHeaderKey = authHeader.substring(7);
+  }
+
+  const providedKey = xApiKey || authHeaderKey || req.query.apiKey;
+
   if (providedKey === apiKey) {
     console.log("Valid API Key provided.");
     return next();
   }
-  
+
   console.log(`Unauthorized attempt with key: ${providedKey}`);
   res.status(401).send("Unauthorized: Invalid API Key");
 });
@@ -221,7 +232,7 @@ const transports = new Map();
 
 app.get("/sse", async (req, res) => {
   console.log("New SSE connection attempt...");
-  
+
   // Use the full URL if possible, otherwise relative
   const transport = new SSEServerTransport("/messages", res);
   const sessionId = Math.random().toString(36).substring(7);
@@ -241,7 +252,7 @@ app.get("/sse", async (req, res) => {
 app.post("/messages", async (req, res) => {
   const sessionId = req.query.sessionId || Array.from(transports.keys())[0];
   console.log(`Message received for session: ${sessionId}`);
-  
+
   const transport = transports.get(sessionId);
   if (!transport) {
     console.error(`No transport found for session: ${sessionId}`);
