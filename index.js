@@ -323,7 +323,9 @@ app.use((req, res, next) => {
 const transports = new Map();
 
 app.get("/sse", async (req, res) => {
-  console.log("New SSE connection attempt...");
+  console.log(`[SSE] New connection attempt from ${req.ip}`);
+  console.log(`[SSE] Headers: ${JSON.stringify(req.headers)}`);
+  console.log(`[SSE] Query: ${JSON.stringify(req.query)}`);
 
   // Use the full URL if possible, otherwise relative
   const transport = new SSEServerTransport("/messages", res);
@@ -342,8 +344,11 @@ app.get("/sse", async (req, res) => {
 });
 
 app.post("/messages", async (req, res) => {
-  const sessionId = req.query.sessionId || Array.from(transports.keys())[0];
-  console.log(`Message received for session: ${sessionId}`);
+  console.log(`[Messages] POST received from ${req.ip}`);
+  console.log(`[Messages] Headers: ${JSON.stringify(req.headers)}`);
+
+  const sessionId = req.query.sessionId || req.headers["mcp-session-id"] || Array.from(transports.keys())[0];
+  console.log(`[Messages] Target Session: ${sessionId}`);
 
   const transport = transports.get(sessionId);
   if (!transport) {
