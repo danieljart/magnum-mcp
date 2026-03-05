@@ -42,10 +42,29 @@ function parseDescription(description) {
     const dataSaida = data['DATA_SAIDA'] ? formatToISO(data['DATA_SAIDA']) : null;
     if (!dataSaida) return null;
 
+    let finalOrigem = data['ORIGEM'];
+    let finalDestino = data['DESTINO'];
+
+    if (!finalOrigem || !finalDestino) {
+        if (data['ROTA']) {
+            if (/ x /i.test(data['ROTA'])) {
+                finalOrigem = finalOrigem || data['ROTA'].split(/ x /i)[0].trim();
+                finalDestino = finalDestino || data['ROTA'].split(/ x /i)[1].trim();
+            } else if (data['ROTA'].toLowerCase().includes('x')) {
+                finalOrigem = finalOrigem || data['ROTA'].toLowerCase().split('x')[0].trim();
+                finalDestino = finalDestino || data['ROTA'].toLowerCase().split('x')[1].trim();
+            }
+        }
+    }
+
+    finalOrigem = (finalOrigem || 'Belém').replace(/-PA$/i, '').trim();
+    // Use Santa Catarina as a fallback if unknown destination
+    finalDestino = (finalDestino || 'Santa Catarina').replace(/-PA$/i, '').trim();
+
     return {
         status: data['STATUS'] || 'ATIVO',
-        origem: (data['ORIGEM'] || (data['ROTA'] && / x /i.test(data['ROTA']) ? data['ROTA'].split(/ x /i)[0].trim() : (data['ROTA'] && data['ROTA'].toLowerCase().includes('x') ? data['ROTA'].toLowerCase().split('x')[0].trim() : 'Belém'))).replace(/-PA$/i, ''),
-        destino: (data['DESTINO'] || (data['ROTA'] && / x /i.test(data['ROTA']) ? data['ROTA'].split(/ x /i)[1].trim() : (data['ROTA'] && data['ROTA'].toLowerCase().includes('x') ? data['ROTA'].toLowerCase().split('x')[1].trim() : (data['ROTA'] || 'Destino')))).replace(/-PA$/i, ''),
+        origem: finalOrigem,
+        destino: finalDestino,
         data_saida: dataSaida,
         tipo_onibus: data['ONIBUS'] || null,
         vagas_total: parseInt(data['LUGARES_TOTAIS']) || 0,
