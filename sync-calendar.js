@@ -44,8 +44,8 @@ function parseDescription(description) {
 
     return {
         status: data['STATUS'] || 'ATIVO',
-        origem: (data['ROTA'] && data['ROTA'].includes('x') ? data['ROTA'].split('x')[0].trim() : 'Belém').replace(/-PA$/i, ''),
-        destino: (data['ROTA'] && data['ROTA'].includes('x') ? data['ROTA'].split('x')[1].trim() : (data['ROTA'] || 'Destino')).replace(/-PA$/i, ''),
+        origem: (data['ORIGEM'] || (data['ROTA'] && / x /i.test(data['ROTA']) ? data['ROTA'].split(/ x /i)[0].trim() : (data['ROTA'] && data['ROTA'].toLowerCase().includes('x') ? data['ROTA'].toLowerCase().split('x')[0].trim() : 'Belém'))).replace(/-PA$/i, ''),
+        destino: (data['DESTINO'] || (data['ROTA'] && / x /i.test(data['ROTA']) ? data['ROTA'].split(/ x /i)[1].trim() : (data['ROTA'] && data['ROTA'].toLowerCase().includes('x') ? data['ROTA'].toLowerCase().split('x')[1].trim() : (data['ROTA'] || 'Destino')))).replace(/-PA$/i, ''),
         data_saida: dataSaida,
         tipo_onibus: data['ONIBUS'] || null,
         vagas_total: parseInt(data['LUGARES_TOTAIS']) || 0,
