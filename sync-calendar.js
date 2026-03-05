@@ -1,5 +1,5 @@
 import { google } from 'googleapis';
-import { createClient } from '@supabase/supabase-js';
+import pg from 'pg';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
@@ -7,13 +7,16 @@ import readline from 'readline';
 
 dotenv.config();
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const { Pool } = pg;
+
 const CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || 'primary';
 const TOKEN_PATH = path.join(process.cwd(), 'token.json');
 const CREDENTIALS_PATH = path.join(process.cwd(), 'credentials.json');
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false }
+});
 
 function formatToISO(dateStr) {
     const parts = dateStr.split('/');
@@ -35,18 +38,22 @@ function parseDescription(description) {
             data[cleanKey] = cleanValue;
         }
     });
+
+    const dataSaida = data['DATA_SAIDA'] ? formatToISO(data['DATA_SAIDA']) : null;
+    if (!dataSaida) return null;
+
     return {
         status: data['STATUS'] || 'ATIVO',
         origem: (data['ROTA'] && data['ROTA'].includes('x') ? data['ROTA'].split('x')[0].trim() : 'Belém').replace(/-PA$/i, ''),
         destino: (data['ROTA'] && data['ROTA'].includes('x') ? data['ROTA'].split('x')[1].trim() : (data['ROTA'] || 'Destino')).replace(/-PA$/i, ''),
-        data_saida: data['DATA_SAIDA'] ? formatToISO(data['DATA_SAIDA']) : null,
-        tipo_onibus: data['ONIBUS'],
+        data_saida: dataSaida,
+        tipo_onibus: data['ONIBUS'] || null,
         vagas_total: parseInt(data['LUGARES_TOTAIS']) || 0,
         vagas_disponiveis: parseInt(data['LUGARES_DISPONIVEIS']) || 0,
         valor_base: parseFloat(data['VALOR_PASSAGEM']) || 0,
-        tempo_viagem: data['TEMPO_VIAGEM'],
-        horario_saida: data['HORARIO_SAIDA'],
-        local_embarque: data['LOCAL_EMBARQUE']
+        tempo_viagem: data['TEMPO_VIAGEM'] || null,
+        horario_saida: data['HORARIO_SAIDA'] || null,
+        local_embarque: data['LOCAL_EMBARQUE'] || null,
     };
 }
 
@@ -98,33 +105,102 @@ function getAccessToken(oAuth2Client) {
     });
 }
 
-async function listEvents(auth) {
-    const calendar = google.calendar({ version: 'v3', auth });
-    const res = await calendar.events.list({
-        calendarId: CALENDAR_ID,
-        timeMin: new Date().toISOString(),
-        maxResults: 50,
-        singleEvents: true,
-        orderBy: 'startTime',
-    });
-    const events = res.data.items;
-    if (!events || events.length === 0) {
-        console.log('No upcoming events found.');
-        return;
+export async function syncCalendarToNeon() {
+    console.log(`[SYNC] Iniciando sincronização Calendar → Neon em ${new Date().toISOString()}`);
+
+    let auth;
+    try {
+        auth = await authorize();
+    } catch (err) {
+        console.error('[SYNC] Falha na autorização do Google Calendar:', err.message);
+        return { success: false, error: err.message };
     }
-    console.log(`Found ${events.length} events. Syncing to Supabase...`);
+
+    const calendar = google.calendar({ version: 'v3', auth });
+    let events;
+    try {
+        const res = await calendar.events.list({
+            calendarId: CALENDAR_ID,
+            timeMin: new Date().toISOString(),
+            maxResults: 100,
+            singleEvents: true,
+            orderBy: 'startTime',
+        });
+        events = res.data.items;
+    } catch (err) {
+        console.error('[SYNC] Erro ao listar eventos do Calendar:', err.message);
+        return { success: false, error: err.message };
+    }
+
+    if (!events || events.length === 0) {
+        console.log('[SYNC] Nenhum evento futuro encontrado no Calendar.');
+        return { success: true, synced: 0, skipped: 0 };
+    }
+
+    console.log(`[SYNC] Encontrados ${events.length} eventos. Sincronizando com Neon...`);
+
+    let synced = 0;
+    let skipped = 0;
+
     for (const event of events) {
         const tripData = parseDescription(event.description);
-        if (!tripData || !tripData.data_saida) {
-            console.log(`Skipping event "${event.summary}" - invalid description format.`);
+        if (!tripData) {
+            console.log(`[SYNC] Pulando "${event.summary}" - formato de descrição inválido.`);
+            skipped++;
             continue;
         }
-        const { error } = await supabase
-            .from('viagens')
-            .upsert(tripData, { onConflict: 'data_saida,origem,destino' });
-        if (error) console.error(`Error syncing trip "${event.summary}":`, error.message);
-        else console.log(`Synced trip: ${event.summary}`);
+
+        try {
+            await pool.query(
+                `INSERT INTO viagens 
+                    (status, origem, destino, data_saida, tipo_onibus, vagas_total, vagas_disponiveis, valor_base, tempo_viagem, horario_saida, local_embarque)
+                 VALUES 
+                    ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                 ON CONFLICT (data_saida, origem, destino) 
+                 DO UPDATE SET
+                    status = EXCLUDED.status,
+                    tipo_onibus = EXCLUDED.tipo_onibus,
+                    vagas_total = EXCLUDED.vagas_total,
+                    vagas_disponiveis = EXCLUDED.vagas_disponiveis,
+                    valor_base = EXCLUDED.valor_base,
+                    tempo_viagem = EXCLUDED.tempo_viagem,
+                    horario_saida = EXCLUDED.horario_saida,
+                    local_embarque = EXCLUDED.local_embarque`,
+                [
+                    tripData.status,
+                    tripData.origem,
+                    tripData.destino,
+                    tripData.data_saida,
+                    tripData.tipo_onibus,
+                    tripData.vagas_total,
+                    tripData.vagas_disponiveis,
+                    tripData.valor_base,
+                    tripData.tempo_viagem,
+                    tripData.horario_saida,
+                    tripData.local_embarque,
+                ]
+            );
+            console.log(`[SYNC] ✅ Sincronizado: ${event.summary}`);
+            synced++;
+        } catch (err) {
+            console.error(`[SYNC] ❌ Erro ao sincronizar "${event.summary}":`, err.message);
+            skipped++;
+        }
     }
+
+    console.log(`[SYNC] Concluído. Sincronizados: ${synced} | Pulados: ${skipped}`);
+    return { success: true, synced, skipped };
 }
 
-authorize().then(listEvents).catch(console.error);
+// Permite rodar diretamente: node sync-calendar.js
+if (process.argv[1] && process.argv[1].endsWith('sync-calendar.js')) {
+    syncCalendarToNeon()
+        .then(result => {
+            console.log('[SYNC] Resultado final:', result);
+            process.exit(0);
+        })
+        .catch(err => {
+            console.error('[SYNC] Erro fatal:', err);
+            process.exit(1);
+        });
+}

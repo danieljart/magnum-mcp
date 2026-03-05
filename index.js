@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
 import { z } from "zod";
+import { syncCalendarToNeon } from "./sync-calendar.js";
 
 dotenv.config();
 
@@ -377,6 +378,29 @@ app.post("/sse", async (req, res) => {
   res.status(400).json({ error: "No active session", hint: "Connect via GET /sse first" });
 });
 
+// Dedicated Webhook Endpoint for GPT Maker Native Integration
+app.post("/gptmaker-webhook", async (req, res) => {
+  console.log(`\n[GPT-MAKER-WEBHOOK] Recebido de: ${req.ip}`);
+  console.log(JSON.stringify(req.body, null, 2));
+  return res.status(200).json({
+    status: "success",
+    message: "Webhook recebido com sucesso",
+    receivedPayload: req.body
+  });
+});
+
+// Manual sync endpoint — force Calendar → Neon sync immediately
+app.post("/sync-now", async (req, res) => {
+  console.log(`[SYNC-NOW] Sincronização manual solicitada por ${req.ip}`);
+  try {
+    const result = await syncCalendarToNeon();
+    return res.status(200).json({ status: "success", ...result });
+  } catch (err) {
+    console.error('[SYNC-NOW] Erro:', err.message);
+    return res.status(500).json({ status: "error", error: err.message });
+  }
+});
+
 app.post("/messages/:sessionId", async (req, res) => {
   let { sessionId } = req.params;
   console.log(`[POST] Request for Session: ${sessionId}`);
@@ -406,8 +430,21 @@ app.post("/messages/:sessionId", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
+const SYNC_INTERVAL_MS = 30 * 60 * 1000; // 30 minutos
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Magnum Turismo MCP Server running on port ${PORT}`);
   console.log(`SSE endpoint: /sse`);
   console.log(`Messages endpoint: /messages`);
+  console.log(`Sync manual endpoint: POST /sync-now`);
+
+  // Sync imediato ao subir o servidor
+  syncCalendarToNeon().catch(err => console.error('[STARTUP-SYNC] Erro:', err.message));
+
+  // Sync automático a cada 30 minutos
+  setInterval(() => {
+    syncCalendarToNeon().catch(err => console.error('[AUTO-SYNC] Erro:', err.message));
+  }, SYNC_INTERVAL_MS);
+
+  console.log(`[SYNC] Sincronização automática agendada a cada ${SYNC_INTERVAL_MS / 60000} minutos.`);
 });
