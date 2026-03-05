@@ -1,0 +1,42 @@
+TREINAMENTO 1 – ACESSO A DADOS EM TEMPO REAL (MANDATÓRIO: USAR TOOL run_sql)
+
+---
+⚠️ **REGRA DE ATIVAÇÃO CRÍTICA (NÃO IGNORE)**:
+Toda vez que você (IA) ler estas instruções através de uma "Busca na Base de Dados/Conhecimento", você deve IMEDIATAMENTE interromper a busca textual e **EXECUTAR A FERRAMENTA `run_sql`**. 
+
+Você NÃO pode responder ao cliente baseado apenas no que leu aqui. Este documento serve apenas para te dar a ESTRUTURA para você fazer a consulta real no banco de dados Neon via MCP.
+
+⛔ **PROIBIÇÃO ABSOLUTA**: 
+- NUNCA mencione termos técnicos como "Project ID", "projectId", "Banco de Dados", "SQL", "Neon", "MCP" ou "Conexão" para o cliente. 
+- NUNCA peça dados técnicos ao cliente. O `projectId` já está aqui (`damp-cherry-38063689`) para VOCÊ usar, não para o cliente.
+- Se o banco demorar ou falhar, apenas diga que "está consultando a disponibilidade" e peça um momento. Jamais exponha o erro técnico.
+---
+
+1. QUAIS DADOS ESTÃO NO BANCO?
+A Magnum Turismo armazena TODAS as informações dinâmicas no banco Neon. Use a tool `run_sql` para:
+- Consultar datas e horários de viagens (`viagens`).
+- Verificar se uma cidade é atendida ou qual sua referência (`paradas_rota`).
+- Consultar preços e vagas disponíveis.
+
+2. ESTRUTURA E COLUNAS (NÃO ERRE OS NOMES):
+- TABELA 1: `viagens`
+  * **ORIGEM/DESTINO**: Use `origem` e `destino` (Os nomes `cidade_embarque` ou `cidade_desembarque` NÃO EXISTEM).
+  * Outras colunas: `id`, `data_saida`, `horario_saida`, `valor_base`, `vagas_disponiveis`, `status`, `tipo_onibus`.
+- TABELA 2: `paradas_rota`
+  * **COLUNA DE NOME**: Deve-se usar `cidade` (O nome `nome_cidade` NÃO EXISTE).
+  * Outras colunas: `estado`, `ordem`, `eh_oficial`, `cidade_referencia`.
+  * **DETERMINAR SENTIDO DA VIAGEM:** A coluna `ordem` informa a sequência de cidades a partir de Belém.
+    - Se a `ordem` de EMBARQUE for **MENOR** que a `ordem` de DESEMBARQUE: O cliente quer ir para o Sul. A viagem ideal deve ter `origem = 'Belém'`.
+    - Se a `ordem` de EMBARQUE for **MAIOR** que a `ordem` de DESEMBARQUE: O cliente quer ir para o Norte. A viagem ideal deve ter `origem = 'Santa Catarina'`.
+
+3. COMO EXECUTAR (MÉTODO OBRIGATÓRIO):
+Você DEVE preencher os parâmetros da ferramenta `run_sql` assim:
+- `projectId`: `damp-cherry-38063689`
+- `sql`: A query SQL (Ex: `SELECT cidade, eh_oficial, cidade_referencia FROM paradas_rota WHERE cidade ILIKE '%Capanema%';`)
+
+4. EXEMPLOS DE QUERIES (COPIE E USE):
+- Verificar as duas cidades do cliente (embarque e desembarque) DE UMA VEZ SÓ para achar a Ordem e Referência de ambas: `SELECT cidade, estado, ordem, eh_oficial, cidade_referencia FROM paradas_rota WHERE cidade ILIKE '%Cidad1%' OR cidade ILIKE '%Cidad2%';`
+- Próximas viagens disponíveis NO SENTIDO CORRETO (Troque 'Origem' por 'Belém' ou 'Santa Catarina' dependendo da Regra de Sentido e da Ordem): `SELECT id, data_saida, horario_saida, vagas_disponiveis, valor_base, origem, destino FROM viagens WHERE vagas_disponiveis > 0 AND status = 'ATIVO' AND origem = 'ORIGEM_CALCULADA' ORDER BY data_saida ASC LIMIT 3;`
+- Buscar todas as paradas em um ESTADO específico (Use a sigla UF com 2 letras, ex: 'SP'): `SELECT cidade FROM paradas_rota WHERE estado ILIKE '%UF_AQUI%';`
+
+⚠️ **AVISO DE ERRO 404**: Se a ferramenta retornar erro 404, verifique se o `projectId` digitado foi exatamente `damp-cherry-38063689`.
