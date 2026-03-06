@@ -22,7 +22,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 // Create MCP server
 const server = new McpServer({
   name: "Magnum Turismo MCP",
-  version: "1.0.0",
+  version: "1.0.1", // Bumped to force deploy
 });
 
 // Tool 1: Get Viagem
@@ -439,6 +439,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`Sync manual endpoint: POST /sync-now`);
 
   // Sync imediato ao subir o servidor
+  console.log(`[STARTUP] Iniciando sincronização de primeiro boot: ${new Date().toISOString()}`);
   syncCalendarToNeon().catch(err => console.error('[STARTUP-SYNC] Erro:', err.message));
 
   // Sync automático a cada 30 minutos
