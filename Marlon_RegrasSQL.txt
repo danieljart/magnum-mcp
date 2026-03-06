@@ -20,7 +20,7 @@ A Magnum Turismo armazena TODAS as informações dinâmicas no banco Neon. Use a
 
 2. ESTRUTURA E COLUNAS (NÃO ERRE OS NOMES):
 - TABELA 1: `viagens`
-  * **ORIGEM/DESTINO**: Use `origem` e `destino` (Os nomes `cidade_embarque` ou `cidade_desembarque` NÃO EXISTEM).
+  * **ORIGEM/DESTINO**: Use `origem` e `destino`. ATENÇÃO: Esta tabela registra APENAS os extremos da rota. A `origem` será SEMPRE 'Belém' ou 'Santa Catarina'. NUNCA use a cidade que o cliente informou (ex: 'Florianópolis', 'Marabá') para filtrar as colunas `origem` ou `destino` na tabela `viagens`.
   * Outras colunas: `id`, `data_saida`, `horario_saida`, `valor_base`, `vagas_disponiveis`, `status`, `tipo_onibus`.
 - TABELA 2: `paradas_rota`
   * **COLUNA DE NOME**: Deve-se usar `cidade` (O nome `nome_cidade` NÃO EXISTE).
