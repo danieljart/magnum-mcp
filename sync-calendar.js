@@ -45,6 +45,9 @@ function parseDescription(description) {
     let finalOrigem = data['ORIGEM'];
     let finalDestino = data['DESTINO'];
 
+    if (finalOrigem && finalOrigem.toLowerCase() === 'origem') finalOrigem = null;
+    if (finalDestino && finalDestino.toLowerCase() === 'destino') finalDestino = null;
+
     if (!finalOrigem || !finalDestino) {
         if (data['ROTA']) {
             if (/ x /i.test(data['ROTA'])) {
@@ -56,6 +59,10 @@ function parseDescription(description) {
             }
         }
     }
+
+    // Se após todo o parse (incluindo da string ROTA) os valores ainda forem literalmente 'origem' ou 'destino', anular:
+    if (finalOrigem && finalOrigem.toLowerCase() === 'origem') finalOrigem = null;
+    if (finalDestino && finalDestino.toLowerCase() === 'destino') finalDestino = null;
 
     finalOrigem = (finalOrigem || 'Belém').replace(/-PA$/i, '').trim();
     // Use Santa Catarina as a fallback if unknown destination
