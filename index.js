@@ -1,76 +1,56 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
-import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
 import { z } from "zod";
+import pg from "pg";
 import { syncCalendarToNeon } from "./sync-calendar.js";
 
 dotenv.config();
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const { Pool } = pg;
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
 
-if (!SUPABASE_URL || !SUPABASE_KEY) {
-  console.error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+if (!process.env.DATABASE_URL) {
+  console.error("Missing DATABASE_URL (Neon)");
   process.exit(1);
 }
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
 // Create MCP server
 const server = new McpServer({
-  name: "Magnum Turismo MCP",
-  version: "1.0.1", // Bumped to force deploy
+  name: "Magnum Turismo MCP (Neon Native)",
+  version: "2.0.0",
 });
 
-// Tool 1: Get Viagem
+// Tool: Run SQL (Neon) - O motor principal agora
 server.tool(
-  "get_viagem",
-  "Busca viagem por data e retorna detalhes de disponibilidade e valor.",
+  "run_sql",
+  "Executa consultas SQL no banco de dados Neon para buscar viagens, paradas e gerenciar reservas.",
   {
-    data: z.string().describe("Data da viagem no formato YYYY-MM-DD"),
+    sql: z.string().describe("O comando SQL para executar"),
   },
-  async ({ data }) => {
-    const { data: viagens, error } = await supabase
-      .from("viagens")
-      .select("id, valor_base, vagas_disponiveis, status, horario_saida, tipo_onibus, local_embarque, tempo_viagem, distancia_km")
-      .eq("data_saida", data);
-
-    if (error) {
+  async ({ sql }) => {
+    try {
+      const result = await pool.query(sql);
       return {
-        content: [{ type: "text", text: `Erro ao buscar viagem: ${error.message}` }],
+        content: [{ type: "text", text: JSON.stringify(result.rows, null, 2) }],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: "text", text: `Erro no SQL: ${error.message}` }],
         isError: true,
       };
     }
-
-    if (!viagens || viagens.length === 0) {
-      return {
-        content: [{ type: "text", text: "Nenhuma viagem encontrada para esta data." }],
-      };
-    }
-
-    return {
-      content: [{ type: "text", text: JSON.stringify(viagens, null, 2) }],
-    };
   }
 );
 
-// Tool 2: Calculate Installment
+// Tool: Calculate Installment (Taxas fixas da Magnum)
 const INSTALLMENT_RATES = {
-  1: 6.38,
-  2: 12.86,
-  3: 14.30,
-  4: 15.08,
-  5: 16.00,
-  6: 17.00,
-  7: 18.37,
-  8: 19.20,
-  9: 20.06,
-  10: 21.10,
-  11: 22.54,
-  12: 23.24,
+  1: 6.38, 2: 12.86, 3: 14.30, 4: 15.08, 5: 16.00, 6: 17.00,
+  7: 18.37, 8: 19.20, 9: 20.06, 10: 21.10, 11: 22.54, 12: 23.24,
 };
 
 server.tool(
@@ -110,166 +90,6 @@ server.tool(
     };
   }
 );
-
-// Tool 3: Create Reservation
-server.tool(
-  "criar_reserva",
-  "Cria uma reserva de viagem chamando a RPC do Supabase.",
-  {
-    viagem_id: z.string().uuid().describe("UUID da viagem"),
-    nome_cliente: z.string().describe("Nome do cliente"),
-    telefone: z.string().describe("Telefone de contato"),
-    quantidade: z.number().min(1).describe("Quantidade de vagas"),
-  },
-  async ({ viagem_id, nome_cliente, telefone, quantidade }) => {
-    const { data, error } = await supabase.rpc("criar_reserva", {
-      p_viagem_id: viagem_id,
-      p_nome_cliente: nome_cliente,
-      p_telefone: telefone,
-      p_quantidade: quantidade,
-    });
-
-    if (error) {
-      return {
-        content: [{ type: "text", text: `Erro na RPC: ${error.message}` }],
-        isError: true,
-      };
-    }
-
-    return {
-      content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
-    };
-  }
-);
-
-// Tool 4: Check Route Stop
-server.tool(
-  "verificar_parada",
-  "Verifica se uma cidade faz parte da rota oficial ou sugere uma alternativa próxima.",
-  {
-    cidade: z.string().describe("Nome da cidade para verificar na rota"),
-  },
-  async ({ cidade }) => {
-    // Busca exata ou por similaridade simples
-    const { data: paradas, error } = await supabase
-      .from("paradas_rota")
-      .select("*")
-      .ilike("cidade", `%${cidade}%`);
-
-    if (error) {
-      return {
-        content: [{ type: "text", text: `Erro ao verificar rota: ${error.message}` }],
-        isError: true,
-      };
-    }
-
-    if (!paradas || paradas.length === 0) {
-      return {
-        content: [{ type: "text", text: "Essa cidade não consta na nossa rota e não temos paradas próximas cadastradas para ela." }],
-      };
-    }
-
-    const resposta = paradas.map(p => {
-      const distInfo = p.distancia_origem_km !== null ? ` (Aprox. ${p.distancia_origem_km}km de Belém)` : "";
-      if (p.eh_oficial) {
-        return `✅ ${p.cidade} (${p.estado}) é uma parada oficial.${distInfo}`;
-      } else {
-        return `📍 Para ${p.cidade}, a parada oficial mais próxima é ${p.cidade_referencia} (${p.estado}).`;
-      }
-    }).join("\n");
-
-    return {
-      content: [{ type: "text", text: resposta }],
-    };
-  }
-);
-
-// Tool 7: Calculate Segment Distance
-server.tool(
-  "calcular_distancia_trecho",
-  "Calcula a distância rodoviária aproximada entre duas cidades da rota.",
-  {
-    cidade_origem: z.string().describe("Cidade de embarque"),
-    cidade_destino: z.string().describe("Cidade de desembarque"),
-  },
-  async ({ cidade_origem, cidade_destino }) => {
-    const { data: paradas, error } = await supabase
-      .from("paradas_rota")
-      .select("cidade, distancia_origem_km")
-      .or(`cidade.ilike.%${cidade_origem}%,cidade.ilike.%${cidade_destino}%`);
-
-    if (error || !paradas || paradas.length < 2) {
-      return {
-        content: [{ type: "text", text: "Não foi possível localizar as duas cidades na rota para calcular a distância. Verifique se os nomes estão corretos." }],
-        isError: true,
-      };
-    }
-
-    const p1 = paradas.find(p => p.cidade.toLowerCase().includes(cidade_origem.toLowerCase()));
-    const p2 = paradas.find(p => p.cidade.toLowerCase().includes(cidade_destino.toLowerCase()));
-
-    if (!p1 || !p2 || p1.distancia_origem_km === null || p2.distancia_origem_km === null) {
-      return {
-        content: [{ type: "text", text: "Dados de quilometragem incompletos para um desses pontos." }],
-        isError: true,
-      };
-    }
-
-    const distancia = Math.abs(p1.distancia_origem_km - p2.distancia_origem_km);
-
-    return {
-      content: [{
-        type: "text",
-        text: `A distância aproximada entre ${p1.cidade} e ${p2.cidade} é de ${distancia} km.`
-      }],
-    };
-  }
-);
-
-// Tool 5: Consult Reservation
-server.tool(
-  "consultar_reserva",
-  "Consulta uma reserva pelo código ou telefone do cliente.",
-  {
-    codigo_ou_telefone: z.string().describe("Código da reserva ou telefone do cliente"),
-  },
-  async ({ codigo_ou_telefone }) => {
-    const isCode = codigo_ou_telefone.length > 10 && !codigo_ou_telefone.includes("-"); // Simplified check
-
-    let query = supabase
-      .from("reservas")
-      .select(`
-        id, codigo_reserva, nome_cliente, telefone, quantidade, valor_total, status, created_at,
-        viagens (origem, destino, data_saida, horario_saida, tipo_onibus)
-      `);
-
-    if (isCode) {
-      query = query.eq("codigo_reserva", codigo_ou_telefone);
-    } else {
-      query = query.eq("telefone", codigo_ou_telefone);
-    }
-
-    const { data: reservas, error } = await query;
-
-    if (error) {
-      return {
-        content: [{ type: "text", text: `Erro ao buscar reserva: ${error.message}` }],
-        isError: true,
-      };
-    }
-
-    if (!reservas || reservas.length === 0) {
-      return {
-        content: [{ type: "text", text: "Nenhuma reserva encontrada com esses dados." }],
-      };
-    }
-
-    return {
-      content: [{ type: "text", text: JSON.stringify(reservas, null, 2) }],
-    };
-  }
-);
-
 
 // Setup Express with SSE
 const app = express();

@@ -1,7 +1,9 @@
 import axios from 'axios';
 import fs from 'fs';
+import dotenv from 'dotenv';
 
-const apiKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJncHRtYWtlciIsImlkIjoiM0VGQTA4NDlCMzcyNDE0MDc3NzE3NjFDQ0JGQjA3RjMiLCJ0ZW5hbnQiOiIzRUZBMDg0OUIzNzI0MTQwNzc3MTc2MUNDQkZCMDdGMyIsInV1aWQiOiJiMjU4ZDU0YS05MDBhLTRhZmMtOTUyZi0yYjJlOGRlZTY4NTEifQ.EgKlt_pA61Ix-6_9vkqC7Aefg3KCS2YYPgniHV9MXMw';
+dotenv.config();
+const apiKey = process.env.GPTMAKER_API_KEY;
 
 const AGENTS = {
     MARLON: {
@@ -23,9 +25,6 @@ const AGENTS = {
         trainingFiles: ["Notificador_Regras.txt"]
     }
 };
-
-const GITHUB_REPO = "danieljart/magnum-mcp";
-const GITHUB_BRANCH = "main";
 
 async function getAgentFullData(agentId) {
     const response = await axios.get(`https://api.gptmaker.ai/v2/agent/${agentId}`, {
@@ -49,41 +48,61 @@ async function updateAgent(agentId, behavior) {
     }
 }
 
+function chunkText(text, size = 950) {
+    const chunks = [];
+    for (let i = 0; i < text.length; i += size) {
+        chunks.push(text.substring(i, i + size));
+    }
+    return chunks;
+}
+
 async function syncTrainings(agentId, fileNames) {
     try {
-        console.log(`Syncing trainings for agent ${agentId}...`);
+        console.log(`\nSyncing trainings for agent ${agentId} via FIXED chunks...`);
 
         // 1. List existing trainings
         const listResponse = await axios.get(`https://api.gptmaker.ai/v2/agent/${agentId}/trainings`, {
             headers: { 'Authorization': `Bearer ${apiKey}` }
         });
-        const currentTrainings = listResponse.data.data;
+        const currentTrainings = (listResponse.data.data || listResponse.data) || [];
 
-        // 2. Delete existing document trainings that we are about to upload
+        // 2. Delete ALL existing TEXT and DOCUMENT trainings related to our managed files
         for (const t of currentTrainings) {
-            if (t.type === 'DOCUMENT' && fileNames.includes(t.documentName)) {
-                console.log(`Deleting old training: ${t.documentName} (${t.id})`);
-                await axios.delete(`https://api.gptmaker.ai/v2/training/${t.id}`, {
-                    headers: { 'Authorization': `Bearer ${apiKey}` }
-                });
+            const isManagedDoc = t.type === 'DOCUMENT' && fileNames.includes(t.documentName);
+            const isManagedText = t.type === 'TEXT' && fileNames.some(name =>
+                t.text && (t.text.includes(`[FILE: ${name}]`) || t.text.includes(`[ARQUIVO: ${name}]`))
+            );
+
+            if (isManagedDoc || isManagedText) {
+                console.log(`Deleting old training: ${t.type} - ID: ${t.id}`);
+                try {
+                    await axios.delete(`https://api.gptmaker.ai/v2/training/${t.id}`, {
+                        headers: { 'Authorization': `Bearer ${apiKey}` }
+                    });
+                } catch (delError) {
+                    console.error(`Failed to delete training ${t.id}:`, delError.message);
+                }
             }
         }
 
-        // 3. Add new trainings as DOCUMENT
+        // 3. Split files into chunks and upload as TEXT
         for (const fileName of fileNames) {
-            console.log(`Adding document training: ${fileName}`);
-            const rawUrl = `https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}/${fileName}`;
-            const payload = {
-                type: "DOCUMENT",
-                documentUrl: rawUrl,
-                documentName: fileName,
-                documentMimetype: "text/plain"
-            };
+            console.log(`Processing file: ${fileName}`);
+            const content = fs.readFileSync(fileName, 'utf8');
+            const chunks = chunkText(content);
 
-            await axios.post(`https://api.gptmaker.ai/v2/agent/${agentId}/trainings`, payload, {
-                headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
-            });
-            console.log(`Uploaded ${fileName} training.`);
+            for (let i = 0; i < chunks.length; i++) {
+                const textPayload = `[FILE: ${fileName}] [PARTE: ${i + 1}/${chunks.length}]\n\n${chunks[i]}`;
+
+                console.log(`Uploading chunk ${i + 1}/${chunks.length} for ${fileName}...`);
+                await axios.post(`https://api.gptmaker.ai/v2/agent/${agentId}/trainings`, {
+                    type: "TEXT",
+                    text: textPayload
+                }, {
+                    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
+                });
+            }
+            console.log(`Finished uploading all chunks for ${fileName}.`);
         }
     } catch (error) {
         console.error(`Error syncing trainings for ${agentId}:`, error.response?.data || error.message);
@@ -92,20 +111,30 @@ async function syncTrainings(agentId, fileNames) {
 
 async function main() {
     const target = process.argv[2];
+    if (!target) {
+        console.log("Usage: node sync_to_gptmaker.js [marlon|suporte|notificador|all]");
+        return;
+    }
+
     const agentsToSync = target === 'all' ? Object.keys(AGENTS) : (AGENTS[target.toUpperCase()] ? [target.toUpperCase()] : []);
 
     if (agentsToSync.length === 0) {
-        console.log("Usage: node sync_to_gptmaker.js [marlon|suporte|notificador|all]");
+        console.log(`Agent '${target}' not found.`);
         return;
     }
 
     for (const key of agentsToSync) {
         const agent = AGENTS[key];
-        console.log(`\n=== Syncing ${agent.name} ===`);
+        console.log(`\n=== Starting Sync: ${agent.name} ===`);
 
-        const behavior = fs.readFileSync(agent.behaviorFile, 'utf8');
-        await updateAgent(agent.id, behavior);
-        await syncTrainings(agent.id, agent.trainingFiles);
+        try {
+            const behavior = fs.readFileSync(agent.behaviorFile, 'utf8');
+            await updateAgent(agent.id, behavior);
+            await syncTrainings(agent.id, agent.trainingFiles);
+            console.log(`=== Finished Sync: ${agent.name} ===\n`);
+        } catch (err) {
+            console.error(`Fatal error syncing ${agent.name}:`, err.message);
+        }
     }
 }
 
