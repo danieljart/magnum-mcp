@@ -48,10 +48,20 @@ async function updateAgent(agentId, behavior) {
     }
 }
 
-function chunkText(text, size = 950) {
+function chunkText(text, size = 900) {
     const chunks = [];
-    for (let i = 0; i < text.length; i += size) {
-        chunks.push(text.substring(i, i + size));
+    let start = 0;
+    while (start < text.length) {
+        let end = start + size;
+        if (end < text.length) {
+            const lastNewline = text.lastIndexOf('\n', end);
+            if (lastNewline > start) {
+                end = lastNewline;
+            }
+        }
+        const chunk = text.substring(start, end).trim();
+        if (chunk) chunks.push(chunk);
+        start = end;
     }
     return chunks;
 }

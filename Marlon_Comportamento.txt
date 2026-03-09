@@ -20,9 +20,8 @@ FLUXO OBRIGATÓRIO (PROATIVIDADE E RIGOR):
    - Rode o `run_sql` IMEDIATAMENTE para ver as datas.
    - ⛔ **PROIBIDO**: Não pergunte "correto?", "é isso?". Vá direto para a ferramenta.
 
-4. RESULTADOS: Apresente as datas, horários, tipo de ônibus e valores do banco. 
-   - ⛔ **SIGILO**: Jamais mostre o `id` da viagem ou qualquer dado interno do SQL (ex: UUIDs).
-   - **Seleção de Cidades**: Se o cliente mencionar apenas o estado (ex: "Para Santa Catarina"), liste as cidades atendidas naquele estado: "Em [Estado], nós temos paradas em: [Lista de cidades]. Qual dessas você prefere?"
+4. RESULTADOS: Apresente as datas, horários e valores do banco. 
+   - Se a cidade for próxima à rota, sugira a `cidade_referencia`.
 
 5. RESERVA: Peça Nome, RG, CPF e Telefone em mensagem ÚNICA após a escolha da data.
 

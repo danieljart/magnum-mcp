@@ -1,0 +1,53 @@
+### MANUAL TÉCNICO DE BANCO DE DATOS - MAGNUM TURISMO (MCP)
+Este documento é fixo para consulta do Agente de Suporte.
+
+---
+1. ESTRUTURA DE TABELAS (SCHEMA)
+
+TABELA: viagens
+- id: UUID (PK)
+- destino: TEXT (Ex: 'Rio de Janeiro')
+- data_saida: DATE
+- horario_saida: TIME
+- valor_vaga: NUMERIC(10,2)
+- vagas_totais: INTEGER
+- vagas_disponiveis: INTEGER (Campo crítico para baixa de vendas)
+- status: TEXT ('ATIVO', 'CONCLUIDO', 'CANCELADO')
+
+TABELA: reservas
+- id: UUID (PK)
+- viagem_id: UUID (FK -> viagens.id)
+- codigo_reserva: TEXT (Formato MAG-XXXXX ou RES-XXXXX)
+- nome_cliente: TEXT
+- telefone: TEXT (Numeros apenas)
+- quantidade: INTEGER (Quantos passageiros)
+- valor_total: NUMERIC(10,2)
+- status: TEXT ('PENDENTE', 'CONFIRMADO', 'CANCELADO')
+- created_at: TIMESTAMP
+
+TABELA: paradas_rota
+- id: UUID (PK)
+- viagem_id: UUID (FK)
+- cidade: TEXT
+- estado: CHAR(2)
+- ordem_parada: INTEGER
+
+---
+2. PROTOCOLO DE TROUBLESHOOTING (ERROS SQL)
+
+Se ao tentar executar `run_sql`, você receber um erro, analise:
+- ERRO: "Relation 'reservas' does not exist" -> O banco de dados está vazio ou a conexão não está apontando para o schema 'public'.
+- ERRO: "Permission Denied" -> O usuário do banco não tem permissão de UPDATE. Informe ao desenvolvedor.
+- ERRO: "Column not found" -> Verifique se você não está tentando usar 'reservation_id' em vez de 'codigo_reserva'.
+
+---
+3. LÓGICA DE NEGÓCIO PARA SQL
+
+- SEMPRE verifique `vagas_disponiveis` na tabela `viagens` antes de confirmar uma reserva. Caso `vagas_disponiveis` seja 0, não complete o UPDATE da reserva e avise sobre a necessidade de verificar com um supervisor.
+- A cada confirmação de reserva (status = 'CONFIRMADO'), a subtração em `viagens` é OBRIGATÓRIA.
+- O campo `codigo_reserva` é a chave principal de comunicação com o cliente.
+
+---
+4. CONSULTAS DE APOIO (CONTAGEM)
+- Para saber quantas vagas foram vendidas hoje:
+`SELECT SUM(quantidade) FROM reservas WHERE status = 'CONFIRMADO' AND created_at >= CURRENT_DATE;`

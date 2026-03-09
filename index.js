@@ -6,6 +6,7 @@ import cors from "cors";
 import { z } from "zod";
 import pg from "pg";
 import { syncCalendarToNeon } from "./sync-calendar.js";
+import { enrichLeads } from "./enrich_leads.js";
 
 dotenv.config();
 
@@ -268,4 +269,20 @@ app.listen(PORT, '0.0.0.0', () => {
   }, SYNC_INTERVAL_MS);
 
   console.log(`[SYNC] Sincronização automática agendada a cada ${SYNC_INTERVAL_MS / 60000} minutos.`);
+
+  // Leads enrichment: rodar às 12h, 20h e 00h (BRT = UTC-3)
+  const LEADS_SYNC_HOURS_BRT = [12, 20, 0];
+  let lastLeadsSync = null;
+  setInterval(() => {
+    const now = new Date();
+    const hourBRT = (now.getUTCHours() - 3 + 24) % 24;
+    const today = now.toISOString().slice(0, 10);
+    const key = `${today}-${hourBRT}`;
+    if (LEADS_SYNC_HOURS_BRT.includes(hourBRT) && lastLeadsSync !== key) {
+      lastLeadsSync = key;
+      console.log(`[LEADS-SYNC] Iniciando enriquecimento de leads (${hourBRT}h BRT)...`);
+      enrichLeads().catch(err => console.error('[LEADS-SYNC] Erro:', err.message));
+    }
+  }, 5 * 60 * 1000); // verifica a cada 5 minutos
+  console.log('[LEADS-SYNC] Agendado para 12h, 20h e 00h (BRT).');
 });

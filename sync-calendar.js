@@ -18,6 +18,14 @@ const pool = new Pool({
     ssl: { rejectUnauthorized: false }
 });
 
+function normalizeCity(name) {
+    if (!name) return null;
+    return name
+        .replace(/-\s*PA$/i, '')   // remove " - PA" ou "-PA" no final
+        .trim()
+        .replace(/\s+/g, ' ');
+}
+
 function formatToISO(dateStr) {
     const parts = dateStr.split('/');
     if (parts.length === 3) {
@@ -64,9 +72,8 @@ function parseDescription(description) {
     if (finalOrigem && finalOrigem.toLowerCase() === 'origem') finalOrigem = null;
     if (finalDestino && finalDestino.toLowerCase() === 'destino') finalDestino = null;
 
-    finalOrigem = (finalOrigem || 'Belém').replace(/-PA$/i, '').trim();
-    // Use Santa Catarina as a fallback if unknown destination
-    finalDestino = (finalDestino || 'Santa Catarina').replace(/-PA$/i, '').trim();
+    finalOrigem = normalizeCity(finalOrigem || 'Belém');
+    finalDestino = normalizeCity(finalDestino || 'Santa Catarina');
 
     return {
         status: data['STATUS'] || 'ATIVO',
